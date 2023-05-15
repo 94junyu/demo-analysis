@@ -1,7 +1,8 @@
 'use strict';
 const line=require('@line/bot-sdk'),
-express=require('express'),
-configGet=require('config');
+    express=require('express'),
+    axios = require('axios'),
+    configGet=require('config');
 
 const {TextAnalyticsClient, AzureKeyCredential} = require("@azure/ai-text-analytics");
 
@@ -32,6 +33,31 @@ async function MS_TextSentimentAnalysis(thisEvent){
     const results = await analyticsClient.analyzeSentiment(document,"zh-Hant",{includeOpinionMining: true });
     console.log("[results]",JSON.stringify(results)) 
 
+    //input data to Json Server
+    let newData = {
+        "sentiment": results[0].sentiment,
+        "confidenceScore": results[0].confidenceScores[results[0].sentiment],
+        "opinionText": ""
+    };
+    //opinion text input
+    if (results[0].sentences[0].opinions.length !=0){
+        newData.opinionText = results[0].sentences[0].opinions[0].target.text;
+    }
+    //update to online js server
+    let axios_add_data = {
+        method:"post",
+        url:"https://lat-test-hw4-jsonserver.azurewebsites.net/reviews",
+        headers:{
+            "content-type":"application/json"
+        },
+        data:newData
+    }
+    axios(axios_add_data)
+    .then(function(response){
+        console.log(JSON.stringify(response.data));
+    })
+    .catch(function(){console.log("error");});
+
     // convert the returned onject into a chinese response with the corresponding score
     const echo = {
         type:'text',
@@ -39,14 +65,47 @@ async function MS_TextSentimentAnalysis(thisEvent){
 
     };
     
+    //check if the response is positive negative or positive
     if(echo.text == "positive")
-        echo.text = "正向; 分數:" + results[0].confidenceScores.positive //+ results[0].target.text
+    {
+        //check if there's any main topic and reply accordingly
+        if(results[0].sentences[0].opinions[0] != null)
+        {
+            echo.text = "您對"+results[0].sentences[0].opinions[0].target.text + "的評價是正向的\n分數:" +  results[0].confidenceScores.positive
+        }
+        else
+        {
+            echo.text = "正向 ,分數:" + results[0].confidenceScores.positive
+        }   
+    }
+    // 中立回應    
     else if(echo.text == "neutral")
-        echo.text = "中立; 分數:" + results[0].confidenceScores.neutral //+ results[0].target.text
+    {
+        if(results[0].sentences[0].opinions[0] != null)
+        {
+            echo.text = "您對"+results[0].sentences[0].opinions[0].target.text + "的評價是中立的\n分數:" +  results[0].confidenceScores.neutral
+        }
+        else
+        {
+            echo.text = "中立 ,分數:" + results[0].confidenceScores.neutral
+        }
+    } 
+    // 負面回應
     else 
-        echo.text = "負面; 分數:" + results[0].confidenceScores.negative //+ results[0].target.text
+    {
+        if(results[0].sentences[0].opinions[0] != null)
+        {
+            echo.text = "您對"+results[0].sentences[0].opinions[0].target.text + "的評價是負面的\n分數:" +  results[0].confidenceScores.negative
+        }
+        else
+        {
+            echo.text = "負面 ,分數:" + results[0].confidenceScores.negative
+        }
+    }
+        
 
     return client.replyMessage(thisEvent.replyToken, echo);
+    
 }
 
 app.post('/callback',line.middleware(configLine),(req,res)=>{
